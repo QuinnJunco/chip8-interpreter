@@ -107,7 +107,7 @@ impl Emulator {
         return Self { 
             mem: init_font(), 
             disp: [0; 256], 
-            pc: 0x200, 
+            pc: Emulator::PROGRAM_START as u16, 
             idx: 0, 
             stack: Stack::new(), 
             delay: Arc::new(Mutex::new(0)), 
@@ -213,7 +213,7 @@ macro_rules! PARSE_FORMAT_3 {
         {
             $instr.op1 = Some((($raw >> 8) & 0xF) as u16);
             $instr.op2 = Some((($raw >> 4) & 0xF) as u16);
-            $instr.op2 = Some(($raw  & 0xF) as u16);
+            $instr.op3 = Some(($raw  & 0xF) as u16);
         }
     };
 }
@@ -228,10 +228,10 @@ impl Instruction {
         };
         
         match instr.opcode {
-            0 | 1 | 2 | 0xA | 0xB => PARSE_FORMAT_1!(raw, instr),
-            3 | 4 | 6 | 7 | 0xC | 0xE | 0xF => PARSE_FORMAT_2!(raw, instr),
-            5 | 8 | 0xD => PARSE_FORMAT_3!(raw, instr),
-            x => println!("Unknown opcode: {:x}.", x)
+            0x0 | 0x1 | 0x2 | 0xA | 0xB => PARSE_FORMAT_1!(raw, instr),
+            0x3 | 0x4 | 0x6 | 0x7 | 0xC | 0xE | 0xF => PARSE_FORMAT_2!(raw, instr),
+            0x5 | 0x8 | 0xD => PARSE_FORMAT_3!(raw, instr),
+            _ => {}
         }
         return instr;
     }
@@ -248,7 +248,92 @@ fn decode(dword: u16) -> Instruction {
 }
 
 fn execute(emu: &mut Emulator, instr: Instruction) {
-    println!("OPCODE: {:x}", instr.opcode);
+    match instr.opcode {
+        0x0 => {
+            match instr.op1 {
+                Some(0x0E0) => {
+                    todo!();
+                }
+                Some(0x0EE) => {
+                    match emu.stack.pop() {
+                        Some(addr) => {
+                            emu.pc = addr;
+                        }
+                        _ => println!("ERROR: Failed to pop from stack, stack empty.")
+                    }
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
+        }
+        0x1 => {
+            match instr.op1 {
+                Some(n) => {
+                    emu.pc = n;
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
+        }
+        0x2 => {
+            match instr.op1 {
+                Some(n) => {
+                    emu.stack.push(emu.pc);
+                    emu.pc = n;
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
+        }
+        0x3 => {
+            match (instr.op1, instr.op2) {
+                (Some(x), Some(b)) => {
+                    if emu.reg[x as usize] == (b as u8) {
+                        emu.pc += 2;
+                    }
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
+        }
+        0x4 => {
+            match (instr.op1, instr.op2) {
+                (Some(x), Some(b)) => {
+                    if emu.reg[x as usize] != (b as u8) {
+                        emu.pc += 2;
+                    }
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
+        }
+        0x5 => {
+            match (instr.op1, instr.op2) {
+                (Some(x), Some(y)) => {
+                    if emu.reg[x as usize] == emu.reg[y as usize] {
+                        emu.pc += 2;
+                    }
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
+        }
+        0x6 => {
+            match (instr.op1, instr.op2) {
+                (Some(x), Some(b)) => {
+                    emu.reg[x as usize] = b as u8;
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
+        }
+        0x7 => {
+            match (instr.op1, instr.op2) {
+                (Some(x), Some(b)) => {
+                    let x = x as usize;
+                    emu.reg[x] = emu.reg[x] + (b as u8);
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
+        }
+        0x8 => {
+            todo!();
+        }
+        x => println!("Unknown opcode: {:x}.", x)
+    }
 }
 
 fn main() {
