@@ -132,7 +132,24 @@ impl Emulator {
     }
 
     pub fn draw(&self) {
-        todo!();
+        let w = screen_width()/64.0;
+        let h = screen_height()/32.0;
+
+        let screen_width = w * 64.0;
+        
+        let mut pt = vec2(0.0, 0.0);
+        for px in self.disp {
+            for b in 0..8 {
+                if pt.x == screen_width {
+                    pt.x = 0.0;
+                    pt.y += h;
+                }
+                let c = if ((px >> b) & 0x1) == 1 {WHITE} else {BLACK};
+                draw_rectangle(pt.x, pt.y, pt.x+w, pt.y+h, c);
+                pt.x += w;
+                
+            }
+        }
     }
 }
 
@@ -318,7 +335,12 @@ fn execute(emu: &mut Emulator, instr: Instruction) {
             todo!();
         }
         0xA => {
-            todo!();
+            match instr.op1 {
+                Some(n) => {
+                    emu.idx = n;
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
         }
         0xB => {
             todo!();
@@ -328,8 +350,25 @@ fn execute(emu: &mut Emulator, instr: Instruction) {
         }
         0xD => {
             match (instr.op1, instr.op2, instr.op3) {
-                (Some(x), Some(y), Some(n)) => {
-                    todo!();
+                (Some(x ), Some(y), Some(n)) => {
+                    let n = n as u8;
+                    let mut sprite: [u8; 0xF] = [0; 0xF];
+                    for i in 0..n {
+                        sprite[i as usize] = emu.getWord(emu.idx + (i as u16));
+                    }
+                    
+                    let Vx = emu.reg[x as usize] as u16;
+                    let Vy = emu.reg[y as usize] as u16;
+                    
+                    let px = ((Vx + (Vy * Vx)) / 8) as usize;
+                    let mut VF = 0;
+                    for i in 0..n {
+                        let i = i as usize;
+                        sprite[i] ^= emu.disp[px + i];
+                        if sprite[i] != (sprite[i] & emu.disp[px + i]) {VF = 1};
+                        emu.disp[px + i] = sprite[i];
+                    }
+                    emu.reg[0xF] = VF;
                 }
                 _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
             }
@@ -344,7 +383,9 @@ fn execute(emu: &mut Emulator, instr: Instruction) {
     }
 }
 
-fn main() {
+
+#[macroquad::main("Chip8")]
+async fn main() {
     let mut emu = Emulator::init();
     let delay = Arc::clone(&emu.delay);
     let sound = Arc::clone(&emu.sound);
@@ -352,11 +393,19 @@ fn main() {
     thread::spawn(move || tick(delay, sound));
 
     emu.loadROM("./roms/IBM Logo.ch8");
-    
-    for i in 0..10 {
-        let raw = fetch(&mut emu);
-        let instr = decode(raw);
-        execute(&mut emu, instr);
+
+    let mut i = 0;
+    loop {
+        emu.disp[i%256] ^= 0xFF; 
+        
+        // let raw = fetch(&mut emu);
+        // let instr = decode(raw);
+        // execute(&mut emu, instr);
+        emu.draw();
+        next_frame().await;
+        
+        i += 1;
+        i %= 256;
+        
     }
-    
 }
