@@ -131,6 +131,18 @@ impl Emulator {
         };
     }
 
+    pub fn readPixel(&self, pixel: u16) -> u8 {
+        let px_o = pixel % 8;
+        let px_i = ((pixel - px_o) / 8) as usize;
+        return (self.disp[px_i] >> px_o) & 0x1// need to shift by px_o unsure how at the moment need to reason out stuff
+    }
+
+    pub fn writePixel(&mut self, pixel: u16, value: u8) {
+        let px_o = pixel % 8;
+        let px_i = ((pixel - px_o) / 8) as usize;
+        self.disp[px_i] ^= value << px_o;
+    }
+
     pub fn draw(&self) {
         let w = screen_width()/64.0;
         let h = screen_height()/32.0;
@@ -359,14 +371,18 @@ fn execute(emu: &mut Emulator, instr: Instruction) {
                     
                     let Vx = emu.reg[x as usize] as u16;
                     let Vy = emu.reg[y as usize] as u16;
+                    println!("({0}, {1})", Vx, Vy);
                     
-                    let px = ((Vx + (Vy * Vx)) / 8) as usize;
+                    let px = Vx + (Vy * 32);
+                    let index = (px / 8) as usize;
+                    let offset = (px % 8);
+                    println!("px={0}, index={1}, offset={2}", px, index, offset);
                     let mut VF = 0;
                     for i in 0..n {
                         let i = i as usize;
-                        sprite[i] ^= emu.disp[px + i];
-                        if sprite[i] != (sprite[i] & emu.disp[px + i]) {VF = 1};
-                        emu.disp[px + i] = sprite[i];
+                        sprite[i] ^= emu.disp[index + i];
+                        if sprite[i] != (sprite[i] & emu.disp[index + i]) {VF = 1};
+                        emu.disp[index + i] = sprite[i];
                     }
                     emu.reg[0xF] = VF;
                 }
@@ -393,14 +409,23 @@ async fn main() {
     thread::spawn(move || tick(delay, sound));
 
     emu.loadROM("./roms/IBM Logo.ch8");
+    emu.disp[0] = 0b10000001;
+    println!("idx0={0} idx7={1}", emu.readPixel(0), emu.readPixel(7));
 
     let mut i = 0;
     loop {
-        emu.disp[i%256] ^= 0xFF; 
+        if i == 10 {
+            emu.writePixel(0, 1);
+        }
+        if i == 250 {
+            emu.writePixel(0, 1);
+        }
+        // emu.disp[i%256] ^= 0xFF; 
         
         // let raw = fetch(&mut emu);
         // let instr = decode(raw);
         // execute(&mut emu, instr);
+        
         emu.draw();
         next_frame().await;
         
