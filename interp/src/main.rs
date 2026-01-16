@@ -23,6 +23,8 @@ const FONT: [u8; 80] = [
         0xF0, 0x80, 0xF0, 0x80, 0x80  // F
         ];
 
+const TOTAL_PIXELS: u16 = 64 * 32;
+
 struct Frame<T> {
     value:      T,
     next:       Option<Box<Frame<T>>>,
@@ -137,31 +139,31 @@ impl Emulator {
         return (self.disp[px_i] >> px_o) & 0x1// need to shift by px_o unsure how at the moment need to reason out stuff
     }
 
-    pub fn writePixel(&mut self, pixel: u16, value: u8) {
+    pub fn writePixel(&mut self, pixel: u16, value: u8) -> u8 {
         let px_o = pixel % 8;
-        let px_i = ((pixel - px_o) / 8) as usize;
+        let px_i = (((pixel - px_o) / 8) % TOTAL_PIXELS) as usize;
+
+        let old = self.disp[px_i];
         self.disp[px_i] ^= value << px_o;
+
+        return if old == self.disp[px_i] {1} else {0};
     }
 
     pub fn draw(&self) {
         let w = screen_width()/64.0;
         let h = screen_height()/32.0;
-
         let screen_width = w * 64.0;
-        
         let mut pt = vec2(0.0, 0.0);
-        for px in self.disp {
-            for b in 0..8 {
-                if pt.x == screen_width {
-                    pt.x = 0.0;
-                    pt.y += h;
-                }
-                let c = if ((px >> b) & 0x1) == 1 {WHITE} else {BLACK};
-                draw_rectangle(pt.x, pt.y, pt.x+w, pt.y+h, c);
-                pt.x += w;
-                
+        for i in 0..TOTAL_PIXELS {
+            if pt.x == screen_width {
+                pt.x = 0.0;
+                pt.y += h;
             }
+            let c = if ((self.readPixel(i))) == 1 {WHITE} else {BLACK};
+            draw_rectangle(pt.x, pt.y, pt.x+w, pt.y+h, c);
+            pt.x += w;
         }
+        
     }
 }
 
@@ -341,10 +343,65 @@ fn execute(emu: &mut Emulator, instr: Instruction) {
             }
         }
         0x8 => {
-            todo!();
+            match (instr.op1, instr.op2, instr.op3) {
+                (Some(x), Some(y), Some(0x0)) => {
+                    emu.reg[x as usize] = emu.reg[y as usize];
+                }
+                (Some(x), Some(y), Some(0x1)) => {
+                    emu.reg[x as usize] |= emu.reg[y as usize];
+                }
+                (Some(x), Some(y), Some(0x2)) => {
+                    emu.reg[x as usize] &= emu.reg[y as usize];
+                }
+                (Some(x), Some(y), Some(0x3)) => {
+                    emu.reg[x as usize] ^= emu.reg[y as usize];
+                }
+                (Some(x), Some(y), Some(0x4)) => {
+                    let x = x as usize;
+                    let sum = (emu.reg[x] as u16) + (emu.reg[y as usize] as u16);
+                    if sum > 0xff {
+                        emu.reg[0xf] = 1;
+                        emu.reg[x] = 0xff;
+                    } else {
+                        emu.reg[x] = sum as u8;
+                    }
+                }
+                (Some(x), Some(y), Some(0x5)) => {
+                    let x = x as usize;
+                    let y = y as usize;
+
+                    emu.reg[0xf] = if emu.reg[x] > emu.reg[y] {1} else {0};
+                    emu.reg[x] -= emu.reg[y];
+                }
+                (Some(x), Some(_), Some(0x6)) => {
+                    let x = x as usize;
+                    emu.reg[0xf] = if emu.reg[x] & 0x1 == 1 {1} else {0};
+                    emu.reg[x] /= 2;
+                }
+                (Some(x), Some(y), Some(0x7)) => {
+                    let x = x as usize;
+                    let y = y as usize;
+
+                    emu.reg[0xf] = if emu.reg[x] < emu.reg[y] {1} else {0};
+                    emu.reg[x] = emu.reg[y] - emu.reg[x];
+                }
+                (Some(x), Some(_), Some(0xE)) => {
+                    let x = x as usize;
+                    emu.reg[0xf] = if emu.reg[x] >> 7 & 0x1 == 1 {1} else {0};
+                    emu.reg[x] *= 2;
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
         }
         0x9 => {
-            todo!();
+            match (instr.op1, instr.op2) {
+                (Some(x), Some(y)) => {
+                    if emu.reg[x as usize] != emu.reg[y as usize] {
+                        emu.pc += 2;
+                    }
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
         }
         0xA => {
             match instr.op1 {
@@ -355,7 +412,12 @@ fn execute(emu: &mut Emulator, instr: Instruction) {
             }
         }
         0xB => {
-            todo!();
+            match instr.op1 {
+                Some(n) => {
+                    emu.pc = (emu.reg[0] as u16) + n;
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
         }
         0xC => {
             todo!();
@@ -371,18 +433,16 @@ fn execute(emu: &mut Emulator, instr: Instruction) {
                     
                     let Vx = emu.reg[x as usize] as u16;
                     let Vy = emu.reg[y as usize] as u16;
-                    println!("({0}, {1})", Vx, Vy);
                     
-                    let px = Vx + (Vy * 32);
-                    let index = (px / 8) as usize;
-                    let offset = (px % 8);
-                    println!("px={0}, index={1}, offset={2}", px, index, offset);
+                    let mut px = Vx + (Vy * 32);
+                
                     let mut VF = 0;
-                    for i in 0..n {
-                        let i = i as usize;
-                        sprite[i] ^= emu.disp[index + i];
-                        if sprite[i] != (sprite[i] & emu.disp[index + i]) {VF = 1};
-                        emu.disp[index + i] = sprite[i];
+                    for s in 0..n {
+                        for o in 0..8 {
+                            if emu.writePixel(px + o, (sprite[s as usize] >> (7 - o)) & 0x1) == 1 {VF = 1;}
+                        }
+                        px += 64;
+                        if px >= TOTAL_PIXELS {break;}
                     }
                     emu.reg[0xF] = VF;
                 }
@@ -409,22 +469,20 @@ async fn main() {
     thread::spawn(move || tick(delay, sound));
 
     emu.loadROM("./roms/IBM Logo.ch8");
-    emu.disp[0] = 0b10000001;
-    println!("idx0={0} idx7={1}", emu.readPixel(0), emu.readPixel(7));
 
     let mut i = 0;
     loop {
-        if i == 10 {
-            emu.writePixel(0, 1);
-        }
-        if i == 250 {
-            emu.writePixel(0, 1);
-        }
+        // if i == 10 {
+        //     emu.writePixel(50000, 1);
+        // }
+        // if i == 250 {
+        //     emu.writePixel(0, 1);
+        // }
         // emu.disp[i%256] ^= 0xFF; 
         
-        // let raw = fetch(&mut emu);
-        // let instr = decode(raw);
-        // execute(&mut emu, instr);
+        let raw = fetch(&mut emu);
+        let instr = decode(raw);
+        execute(&mut emu, instr);
         
         emu.draw();
         next_frame().await;
