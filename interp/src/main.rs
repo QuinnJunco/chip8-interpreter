@@ -1,6 +1,6 @@
 use std::{fs::{self, File}, process::{exit, id}, sync::*, thread, time::{Duration, Instant}};
 
-use macroquad::prelude::*;
+use macroquad::{audio::{Sound, play_sound}, prelude::*, rand::{self, rand}};
 
 const FILE_NOT_FOUND: i32 = 1;
 
@@ -24,6 +24,13 @@ const FONT: [u8; 80] = [
         ];
 
 const TOTAL_PIXELS: u16 = 64 * 32;
+
+const REAL_KEYCODES: [KeyCode; 16] = [
+    KeyCode::Key1, KeyCode::Key2, KeyCode::Key3, KeyCode::Key4,
+    KeyCode::Q, KeyCode::W, KeyCode::E, KeyCode::R,
+    KeyCode::A, KeyCode::S, KeyCode::D, KeyCode::F,
+    KeyCode::Z, KeyCode::X, KeyCode::C, KeyCode::V
+];
 
 struct Frame<T> {
     value:      T,
@@ -420,7 +427,12 @@ fn execute(emu: &mut Emulator, instr: Instruction) {
             }
         }
         0xC => {
-            todo!();
+            match (instr.op1, instr.op2) {
+                (Some(x), Some(n) ) => {
+                    emu.reg[x as usize] = (n as u8) & ((rand() & 0xff) as u8);
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
         }
         0xD => {
             match (instr.op1, instr.op2, instr.op3) {
@@ -450,10 +462,89 @@ fn execute(emu: &mut Emulator, instr: Instruction) {
             }
         }
         0xE => {
-            todo!();
+            match (instr.op1, instr.op2) {
+                (Some(x), Some(0x9E)) => {
+                    if is_key_down(REAL_KEYCODES[emu.reg[x as usize] as usize]) {
+                        emu.pc += 2;
+                    }
+                }
+                (Some(x), Some(0xA1)) => {
+                    if !is_key_down(REAL_KEYCODES[emu.reg[x as usize] as usize]) {
+                        emu.pc += 2;
+                    }
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
+            
         }
         0xF => {
-            todo!();
+            match (instr.op1, instr.op2) {
+                (Some(x), Some(0x07)) => {
+                    {
+                        let d = emu.delay.lock().unwrap();
+                        emu.reg[x as usize] = *d;
+                    }
+                }
+                (Some(x), Some(0x0A)) => {
+                    let x = x as usize;
+                    let mut pressed: bool = false;
+                    for i in 0..REAL_KEYCODES.len() {
+                        if is_key_down(REAL_KEYCODES[i]) {
+                            emu.reg[x] = i as u8;
+                            pressed = true;
+                            break;
+                        }
+                    }
+
+                    if !pressed {
+                        emu.pc -= 2;
+                    }
+                }
+                (Some(x), Some(0x15)) => {
+                    {
+                        let mut d = emu.delay.lock().unwrap();
+                        *d = emu.reg[x as usize];
+                    }
+                }
+                (Some(x), Some(0x18)) => {
+                    {
+                        let mut s = emu.sound.lock().unwrap();
+                        *s = emu.reg[x as usize];
+                    }
+
+                }
+                (Some(x), Some(0x1E)) => {
+                    emu.idx += emu.reg[x as usize] as u16;
+                }
+                (Some(x), Some(0x29)) => {
+                    emu.idx = (emu.reg[x as usize] * 5) as u16;
+                }
+                (Some(x), Some(0x33)) => {
+                    let x = x as usize;
+                    let idx = emu.idx as usize;
+                    emu.mem[idx] = (emu.reg[x] / 100) % 10;
+                    emu.mem[idx + 1] = (emu.reg[x] / 10) % 10;
+                    emu.mem[idx + 2] = emu.reg[x] % 10;
+                }
+                (Some(x), Some(0x55)) => {
+                    let mut idx = emu.idx as usize;
+                    for i in 0..x {
+                        let i = i as usize;
+                        emu.mem[idx] = emu.reg[i];
+                        idx += 1;
+                    }
+
+                }
+                (Some(x), Some(0x65)) => {
+                    let mut idx = emu.idx as usize;
+                    for i in 0..x {
+                        let i = i as usize;
+                        emu.reg[i] = emu.mem[idx];
+                        idx += 1;
+                    }
+                }
+                _ => println!("ERROR: Unknown operand for opcode: {:x}", instr.opcode)
+            }
         }
         x => println!("Unknown opcode: {:x}.", x)
     }
@@ -470,25 +561,12 @@ async fn main() {
 
     emu.loadROM("./roms/IBM Logo.ch8");
 
-    let mut i = 0;
     loop {
-        // if i == 10 {
-        //     emu.writePixel(50000, 1);
-        // }
-        // if i == 250 {
-        //     emu.writePixel(0, 1);
-        // }
-        // emu.disp[i%256] ^= 0xFF; 
-        
         let raw = fetch(&mut emu);
         let instr = decode(raw);
         execute(&mut emu, instr);
         
         emu.draw();
         next_frame().await;
-        
-        i += 1;
-        i %= 256;
-        
     }
 }
